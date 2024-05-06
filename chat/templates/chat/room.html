@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Handsontable Spreadsheet</title>
+    <link rel="stylesheet" type="text/css"
+          href="https://cdn.jsdelivr.net/npm/handsontable/dist/handsontable.full.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/handsontable/dist/handsontable.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script>
+        // csrf_tokenの取得
+        function getCookie(name) {
+            var cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                var cookies = document.cookie.split(';');
+                for (var i = 0; i < cookies.length; i++) {
+                    var cookie = jQuery.trim(cookies[i]);
+                    // Does this cookie string begin with the name we want?
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        function csrfSafeMethod(method) {
+            // these HTTP methods do not require CSRF protection
+            return (/^(GET|HEAD|OPTIONS|TRACE)$/.test(method));
+        }
+
+        var ignoreChange = false;
+
+        var setBooleansObject = function (obj) {
+            for (var key in obj) {
+                if (obj[key] === "true") {
+                    obj[key] = true;
+                } else if (obj[key] === "false") {
+                    obj[key] = false;
+                }
+            }
+        }
+
+        $(document).ready(function () {
+            var socket = new WebSocket(
+                'ws://' + window.location.host + '/ws/chat/' + 'room' + '/'
+            );
+            var None = ''
+            console.log("hiddenrows", {{ hidden_rows|safe }})
+
+            socket.onopen = function () {
+                var container = document.getElementById('spreadsheet');
+                var extraHotSettings = {{ hot_settings|safe }};
+                setBooleansObject(extraHotSettings);
+                var hotSettings = {
+                    colHeaders: {{ colHeaders|safe }},
+                    columns: {{ columns|safe }},
+                    data: {{ data|safe }},
+                    beforeChange: function (changes, source) {
+                        if (!ignoreChange && source === 'edit') {
+                            console.log("beforeChange", changes, source)
+
+                            // 範囲選択したときにviewを範囲分だけ実行する
+                            for (const c of changes) {
+                                socket.send(JSON.stringify([c]));
+                                AutoSubmit(c, hot);
+                            }
+                        }
+                    },
+                    beforePaste: function (changes, source) {
+                        for (var i = 0; i < changes.length; i++) {
+                            for (var j = 0; j < changes[i].length; j++) {
+                                var c = [source[0].startRow + i, source[0].startCol + j, '', changes[i][j]]
+                                socket.send(JSON.stringify([c]));
+                                AutoSubmit(c, hot);
+                            }
+                        }
+                    },
+                }
+                var hotSettings = $.extend(hotSettings, extraHotSettings);
+
+
+                // max_lengthを実装
+                (function (Handsontable) {
+
+                    'use strict';
+
+                    var MaxLengthEditor = Handsontable.editors.TextEditor.prototype.extend();
+
+                    MaxLengthEditor.prototype.prepare = function () {
+                        Handsontable.editors.TextEditor.prototype.prepare.apply(this, arguments);
+
+                        this.TEXTAREA.maxLength = this.cellProperties.maxLength;
+                    };
+
+                    Handsontable.editors.MaxLengthEditor = MaxLengthEditor;
+                    Handsontable.editors.registerEditor('maxlength', MaxLengthEditor);
+
+                })(Handsontable);
+
+                var hot = new Handsontable(container, hotSettings);
+
+
+                socket.onmessage = function (event) {
+                    var data = JSON.parse(event.data);
+                    console.log("data", data, hot.getDataAtCell(0, data.data[0][0]))
+
+                    ignoreChange = true;
+                    // フィルターを掛けたりすると別ウィンドウではデータの位置が違う場合がある
+                    hot.setDataAtRowProp(data.data[0][0], data.data[0][1], data.data[0][3]);
+                    ignoreChange = false;
+
+                    var h1 = document.getElementById("input_check");
+                    h1.innerHTML = data.message; // 書き込み内容を表示
+
+                };
+            };
+
+            socket.onerror = function () {
+                // 接続エラー時の処理
+                var h1 = document.getElementById("input_check");
+                h1.innerHTML = "チェック:サーバーにアクセスできません";
+            };
+
+            socket.onclose = function () {
+                // 接続が切断された時の処理
+                var h1 = document.getElementById("input_check");
+                h1.innerHTML = "チェック:サーバーとの接続が切断されました｡再度､開き直してください｡";
+            };
+
+            // viewsに送る
+            function AutoSubmit(e, hot) {
+                var data_type = {{ columns|safe }}[e[1]].type
+                var data_field = {{ fields|safe }}[e[1]]
+
+                $.ajax({
+                    type: "POST",
+                    data: {
+                        "id": hot.getDataAtCell(e[0], 0),
+                        "field": data_field,
+                        "type": data_type,  // 追加: セルのタイプを送信
+                        "value": e[3],
+                    },
+                    contentType: "application/json",
+                    timeout: 5000,
+                    // AJAXリクエストにトークンをセット
+                    beforeSend: function (xhr, settings) {
+                        if (!csrfSafeMethod(settings.type) && !this.crossDomain) {
+                            xhr.setRequestHeader("X-CSRFToken", getCookie("csrftoken"));
+                        }
+                    },
+                }).done(function (data) {
+                    // alert("success");
+                    var h1 = document.getElementById("input_check");
+                    h1.innerHTML = data.message;
+                }).fail(function (jqXHR, textStatus) {
+                    // alert("error");
+                });
+            }
+        });
+    </script>
+</head>
+<body>
+<h1 id="input_check">{{ check|safe }}</h1>
+<div id="spreadsheet" style="zoom: {{ zoom }};"></div>
+</body>
+</html>
