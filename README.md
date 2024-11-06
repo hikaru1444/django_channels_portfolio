@@ -79,6 +79,10 @@ http://127.0.0.1:8000
 
 ※ migrationsで初期データを100件生成している
 
-# django_channels
-# django_channels
-# django_channels_portfolio
+
+## 追記
+2024年11月6日
+chat/views.pyにあるzoomを変更するとセル幅の自動調整がうまくいかなくなります
+例: zoom=0.8に設定してrunserverした後に金額列に「123456789」と入力すると「89」が見切れて表示される
+zoomを使うのはスプレットシートが大きい時が多いためstrechHを使いといいかもしれません
+例: chat/views.pyのhot_settingsに「'stretchH': 'all',」を追加
